@@ -166,7 +166,7 @@ static struct job *find_job(int job_id, bool remove) {
                     last->next = tmp->next;
                 } else {
                     assert(tmp == jobbies);
-                    jobbies = NULL;
+                    jobbies = tmp->next;
                 }
             }
             return tmp;
@@ -207,47 +207,82 @@ static struct job *find_job(int job_id, bool remove) {
 int run_command(char *args[MAX_ARGS], int stdin, int stdout, int job_id) {
     /* Lab 2: Your code here */
     int rv = 0;
-    struct job s = find_job(job_id, false);
-    s->kidlets = (struct kiddo *)malloc(sizeof(struct kiddo) * 5);
+    struct job *s = find_job(job_id, false);
+    if (s == NULL) {
+        return -errno;
+    }
     extern char **environ;
     if (args[0] == NULL) {
         return -errno;
     }
+    char *cmd = NULL;
+    if (args[0] == "/" || args[0] == ".") {
+        cmd = strdup(args[0]);
+    } else {
+        int i = 0;
+        while (path_table[i] != NULL) {
+            // Calculate required buffer size
+            size_t path_len = strlen(path_table[i]) + strlen(args[0]) + 2;
+            char *tmp = malloc(path_len);
 
-    if (args[0][0] == "." || args[0][0] == "/") {
-        if (access(args[0], X_OK) != 0) {
-            printf("File not found or not executable: %s", args[0]);
-            return -errno;
+            if (!tmp) {
+                return -ENOMEM;
+            }
+
+            // Build path safely
+            snprintf(tmp, path_len, "%s/%s", path_table[i], args[0]);
+
+            // Check if executable exists and is accessible
+            if (access(tmp, X_OK) == 0) {
+                cmd = strdup(tmp);
+                free(tmp);
+                break;
+            }
+
+            free(tmp);
+            i++;
         }
-        if (fork() == 0) {
-            execve(args[0], args, environ);
+    }
+    if (cmd == NULL) {
+        return -ENOENT;
+    }
+
+    pid_t pid = fork();
+
+    if (pid < 0) {
+        return -errno;
+    }
+
+    if (pid == 0) {
+        if (stdin != STDIN_FILENO) {
+            dup2(stdin, STDIN_FILENO);
+            close(stdin);
         }
-        int state;
-        wait(&state);
-        find_job(id, true);
-        return WEXITSTATUS(state);
+
+        if (stdout != STDOUT_FILENO) {
+            dup2(stdout, STDOUT_FILENO);
+            close(stdout);
+        }
+
+        execve(cmd, args, environ);
+        _exit(-errno);
     }
 
-    int length = 0;
-    while (path_table[length] != NULL) {
-        length++;
-    }
-    length++;
-    char **pathTableCopy = (char **)malloc(sizeof(char *) * length);
-    for (int i = 0; i < length; i++) {
-        pathTableCopy[i] = strdup(path_table[i]);
-    }
-    char *tmp = strtok(pathTableCopy, ":");
+    free(cmd);
 
-    while (tmp != NULL) {
-        char full_path[50];
-        snprintf(full_path, 50, "%s/%s", tmp, )
-    }
+    struct kiddo *k = (struct kiddo *)malloc(sizeof(struct kiddo));
+    k->pid = pid;
+    k->next = s->kidlets;
+    s->kidlets = k;
+
+    if (stdin != STDIN_FILENO) close(stdin);
+    if (stdout != STDOUT_FILENO) close(stdout);
 
     // Suppress the compiler warning that find_job is not used in the starer
     // code. You may remove this line if/when you use find_job in your code.
-    (void)&find_job;
-    return rv;
+    //(void)&find_job;
+
+    return 0;
 }
 
 /* Wait for the job to complete and free internal bookkeeping
@@ -264,6 +299,26 @@ int run_command(char *args[MAX_ARGS], int stdin, int stdout, int job_id) {
  * Returns zero on success, -errno on error.
  */
 int wait_on_job(int job_id, int *exit_code) {
-    int ret = 0;
-    return ret;
+    struct job *s = find_job(job_id, true);
+    if (s == NULL) {
+        return -errno;
+    }
+
+    int last_status = 0;
+    while (s->kidlets != NULL) {
+        int status;
+        pid_t res = waitpid(s->kidlets->pid, &status, 0);
+        if (res < 0) {
+            return -errno;
+        }
+
+        last_status = status;
+        struct kiddo *next = s->kidlets->next;
+        free(s->kidlets);
+        s->kidlets = next;
+    }
+
+    *exit_code = last_status;
+    free(s);
+    return 0;
 }

@@ -90,17 +90,62 @@ int main(int argc, char **argv, char **envp) {
         //
         // Comment this line once you implement
         // command handling
-        dprintf(1, "%s\n", cmd);
-        int res = 0;
-        handle_builtin((char **)parsed_commands, 0, 1, &res);
+        // dprintf(1, "%s\n", cmd);
+        int handled = handle_builtin((char **)parsed_commands, 0, 1, &ret);
+        if (handled == 0) {
+            int pipefd[2] = {-1, -1};
+            int prev_read_fd = -1;
+            int *jobList = (int *)malloc(sizeof(int) * 50);
+            int numOfJobs = 0;
+            for (int i = 0; parsed_commands[i][0] != '\0'; i++) {
+                int job_id = create_job();
+                if (job_id < 0) {
+                    free(jobList);
+                    dprintf(2, "Error creating command %d\n", job_id);
+                }
+                jobList[numOfJobs++] = job_id;
+                // Last command in pipeline
+                if (parsed_commands[i + 1][0] == '\0') {
+                    ret = run_command(
+                        parsed_commands[i],
+                        prev_read_fd == -1 ? STDIN_FILENO : prev_read_fd,
+                        STDOUT_FILENO, job_id);
+                    if (prev_read_fd != -1) close(prev_read_fd);
+                    break;
+                }
 
+                // Create new pipe for next command
+                if (pipe(pipefd) == -1) {
+                    if (prev_read_fd != -1) close(prev_read_fd);
+                    dprintf(2, "failed to generate pipeline - %d\n", -errno);
+                }
+
+                // Run command with appropriate fds
+                ret = run_command(
+                    parsed_commands[i],
+                    prev_read_fd == -1 ? STDIN_FILENO : prev_read_fd, pipefd[1],
+                    job_id);
+
+                // Cleanup current pipe iteration
+                if (prev_read_fd != -1) close(prev_read_fd);
+                close(pipefd[1]);
+                prev_read_fd = pipefd[0];  // Save read end for next iteration
+            }
+            printf("Ret code: %d\n", ret);
+            for (int i = 0; i < numOfJobs; i++) {
+                wait_on_job(jobList[i], &ret);
+                if (ret < 0) {
+                    dprintf(2, "Job failed: %d", jobList[i]);
+                    free(jobList);
+                }
+            }
+        }
         // In Lab 2, you will need to add code to actually run the commands,
         // add debug printing, and handle redirection and pipelines, as
         // explained in the handout.
         //
         // For now, ret will be set to zero; once you implement command
         // handling, ret should be set to the return from the command.
-        ret = 0;
 
         // Do NOT change this if/printf - it is used by the autograder.
         if (ret) {

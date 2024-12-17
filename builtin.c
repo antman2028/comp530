@@ -19,51 +19,32 @@ static char usr_path[MAX_INPUT];
 
 /* Handle a cd command.  */
 int handle_cd(char *args[MAX_INPUT], int stdin, int stdout) {
-    // Note that you need to handle special arguments, including:
-    // "-" switch to the last directory
-    // "." switch to the current directory.  This should change the
-    //     behavior of a subsequent "cd -"
-    // ".." go up one directory
-    //
-    // Hint: chdir can handle "." and "..", but saving
-    //       these results may not be the desired outcome...
-
-    // XXX: Test for errors in the output if a cd fails
-
-    // Lab 2: Your code here
-    //
-
-    // Remove the following two lines once implemented.  These
-    // just suppress the compiler warning around an unused variable
-
-    if (strlen(*args) != 2) {
-        if (strlen(*args) < 2) {
-            perror("Directory argument missing");
-        } else {
-            perror("Only supports 1 directory argument");
-        }
+    if (args[1] == NULL) {
+        dprintf(2, "Directory argument missing\n");
         return 1;
     }
 
+    char target_path[MAX_INPUT];
     if (strcmp(args[1], "-") == 0) {
         if (strlen(old_path) == 0) {
-            fprintf(stderr, "cd: OLDPWD not set\n");
-            return 1;
+            dprintf(2, "cd: OLDPWD not set\n");
+            return -errno;
         }
-        strcpy(args[1], old_path);
+        strcpy(target_path, old_path);
+    } else {
+        strcpy(target_path, args[1]);
     }
 
-    char *temp = strdup(cur_path);
-    if (chdir(args[1]) != 0) {
-        char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg),
-                 "-thsh: cd: %s: invalid option\n", args[1]);
-        write(1, error_msg, strlen(error_msg));
-        return 1;
+    // Save current path before changing
+    strcpy(old_path, cur_path);
+
+    if (chdir(target_path) != 0) {
+        dprintf(2, "-thsh: cd: %s: invalid option\n", target_path);
+        return -errno;
     }
-    strcpy(old_path, temp);
+
     if (getcwd(cur_path, sizeof(cur_path)) == 0) {
-        return 1;
+        return -errno;
     }
 
     return 0;
@@ -123,6 +104,9 @@ static struct builtin builtins[] = {
  */
 int handle_builtin(char *args[MAX_ARGS], int stdin, int stdout, int *retval) {
     // Lab 0: Your Code Here
+    if (!args || !args[0] || !retval) {
+        return 0;  // Not a builtin if invalid args
+    }
     // Comment this line once implemented.  This just suppresses
     // the unused variable warning from the compiler.
     // (void) builtins;
